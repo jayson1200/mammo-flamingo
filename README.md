@@ -1,1 +1,1 @@
-Improving Vision-Language Models ability in medical domain specialization explicitly for breast cancer. 
+Enhancing Vision-Language Models for Specialized Medical Tasks: A Focus on Breast Cancer Diagnosis Detection and Analysis
