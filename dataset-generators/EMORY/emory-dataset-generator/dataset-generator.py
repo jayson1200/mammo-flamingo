@@ -6,7 +6,9 @@ import pandas as pd
 import numpy as np
 import re
 import json
+import ast
 from tqdm import tqdm
+
 
 embed_clinical = pd.read_csv("../emory-patient-feats/tables/EMBED_OpenData_clinical.csv", low_memory=False)
 embed_metadata = pd.read_csv("../emory-patient-feats/tables/EMBED_OpenData_metadata_reduced.csv", low_memory=False)
@@ -15,7 +17,6 @@ embed_metadata_reduced = pd.read_csv("../emory-patient-feats/tables/EMBED_OpenDa
 embed_clinical.fillna("N/A", inplace=True)
 embed_metadata.fillna("N/A", inplace=True)
 embed_metadata_reduced.fillna("N/A", inplace=True)
-
 
 incompat_race_desc = ["Patient Declines", "Unknown, Unavailable or Unreported", "Not Recorded", "N/A"]
 incompat_marital_desc = ["Unknown", "Not Recorded", "N/A"]
@@ -80,10 +81,25 @@ path_sev_to_open_end = {
     5: "normal findings"
 }
 
+pos_locs = np.array([["top left,", "top center", "top right"], 
+                     ["middle left", "middle center", "middle right"], 
+                     ["bottom left", "bottom center", "bottom right"]])
+
+pos_locs_sample = pos_locs.flatten()
+
+pos_correct_idx_to_letter = {
+    0: "A",
+    1: "B",
+    2: "C",
+    3: "D",
+    4: "E",
+    5: "F",
+}
+
 
 for _, curr_pat_row in tqdm(embed_clinical.iterrows(), total=len(embed_clinical)):
     curr_pat_stud_num = curr_pat_row["acc_anon"]
-    curr_study_df = embed_metadata.loc[embed_metadata["acc_anon"] == curr_pat_stud_num]
+    curr_study_df = embed_metadata_reduced.loc[embed_metadata["acc_anon"] == curr_pat_stud_num]
 
     # Base information generation        
     race = ""
@@ -251,7 +267,92 @@ for _, curr_pat_row in tqdm(embed_clinical.iterrows(), total=len(embed_clinical)
             all_qs.append(age_qa)
 
         # ROI annotations
-        if(curr_pat_row["roi_annotations"] != "N/A" )
+        if(curr_study_row["ROI_coords"] != "N/A" and 
+           curr_study_row["WindowWidth"] != "N/A" and 
+           curr_study_row["WindowCenter"] != "N/A" and
+           len(curr_study_row["WindowCenter"]) < 5 and
+           len(curr_study_row["WindowWidth"]) < 5):
+
+            width = int(curr_study_row["WindowWidth"])
+            length = int(curr_study_row["WindowCenter"])
+            rois = [[int(x) for x in re.findall(r"-?\d+", sublist)] for sublist in re.findall(r"\([^()]+\)", curr_study_row["ROI_coords"])]
+
+            locs = []
+
+            for roi in rois:
+                center_loc_x = (roi[-1] - roi[1]) / 2
+                center_loc_y = (roi[2] - roi[0]) / 2
+
+                percent_width = center_loc_x / width
+                percent_len = center_loc_y / length
+
+                ans = ""
+
+                if percent_width < 0.33 and percent_len < 0.33:
+                    ans = pos_locs[0, 0]
+                elif percent_width < 0.66 and percent_len < 0.33:
+                    ans = pos_locs[0, 1]
+                elif percent_width < 1 and percent_len < 0.33:
+                    ans = pos_locs[0, 2]
+                elif percent_width < 0.33 and percent_len < 0.66:
+                    ans = pos_locs[1, 0]
+                elif percent_width < 0.66 and percent_len < 0.66:
+                    ans = pos_locs[1, 1]
+                elif percent_width < 1 and percent_len < 0.66:
+                    ans = pos_locs[1, 2]
+                elif percent_width < 0.33 and percent_len < 1:
+                    ans = pos_locs[2, 0]
+                elif percent_width < 0.66 and percent_len < 1:
+                    ans = pos_locs[2, 1]
+                else:
+                    ans = pos_locs[2, 2]
+
+                locs.append(ans)
+
+            true_uni_locs, true_counts = np.unique(locs, return_counts=True)
+
+            mcq_false_ops = np.random.choice(pos_locs, size=(4, len(locs)), replace=True)
+            ops_uni_locs, ops_counts = np.unique(mcq_false_ops, return_counts=True, axis=1)
+
+            ins_idx = np.random.randint(0, 4)
+
+            mcq_uni_locs = np.insert(ops_uni_locs, ins_idx, true_uni_locs, axis=0)
+            mcq_counts = np.insert(ops_counts, ins_idx, true_counts, axis=0)
+
+            loc_mcq_ans_choices = []
+
+            for curr_choice_idx in range(5):
+                curr_str = ""
+
+                for i in range(mcq_uni_locs.shape[1]):
+                    if i != mcq_uni_locs.shape[1] - 1:
+                        curr_str += f"{mcq_counts[curr_choice_idx, i]} {mcq_uni_locs[curr_choice_idx, i]},"
+                    else:
+                        curr_str += f"{mcq_counts[curr_choice_idx, i]} {mcq_uni_locs[curr_choice_idx, i]}"
+                
+                loc_mcq_ans_choices.append(curr_str)
+
+            loc_q = f"{base} What are the locations of the ROIs?"
+            loc_mcq_version = f"{loc_q} \nChoices: (A) {loc_mcq_ans_choices[0]} (B) {loc_mcq_ans_choices[1]} (C) {loc_mcq_ans_choices[2]} (D) {loc_mcq_ans_choices[3]} (E) {loc_mcq_ans_choices[4]}"
+            loc_mcq_ans = pos_correct_idx_to_letter[ins_idx]
+
+            loc_open_end_ans = f"For ROIs, there are {loc_mcq_ans_choices[ins_idx]}."
+
+            img_paths = [curr_study_row["anon_dicom_path"]]
+
+            loc_qa = {
+                "img_paths": img_paths,
+                "mcq":{
+                    "q": loc_mcq_version,
+                    "a": loc_mcq_ans},
+                "open_end": {
+                    "q": loc_q,
+                    "a": loc_open_end_ans
+                },
+                "qtype": "loc"
+            }
+
+            all_qs.append(loc_qa)
 
 
 
