@@ -17,15 +17,6 @@ TARGET_EACH_TYPE = 500
 BUCKET_NAME = "emory-dataset"
 SHARD_SIZE = 250
 
-question_counts = {
-    "asses": 0,
-    "path_sev": 0,
-    "density": 0,
-    "view": 0,
-    "age": 0,
-    "loc": 0
-}
-
 total_qs = 0
 
 def download_blob_as_base64(source_blob_name):
@@ -59,10 +50,20 @@ def dictionaries_to_tar_in_gcp(dictionaries, folder_name, shard_num):
 
 
 def create_formatted_dataset(qs, start_idx, folder_name):
+    question_counts = {
+        "asses": 0,
+        "path_sev": 0,
+        "density": 0,
+        "view": 0,
+        "age": 0,
+        "loc": 0
+    }
+    
     curr_shard_qs = []
     num_shards = 0
     last_idx = 0
     total_qs = 0
+    
     with tqdm(total=TARGET_EACH_TYPE * 6, desc="Processing files", unit="file") as pbar:
         for q in qs["qs"][start_idx:]:
             last_idx += 1
