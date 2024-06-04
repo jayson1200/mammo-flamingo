@@ -3,6 +3,8 @@ import base64
 import io
 import tarfile
 import random
+import sys
+from tqdm import tqdm
 from tempfile import NamedTemporaryFile
 
 from google.cloud import storage
@@ -60,29 +62,33 @@ def create_formatted_dataset(qs, start_idx, folder_name):
     curr_shard_qs = []
     num_shards = 0
     last_idx = 0
+    total_qs = 0
+    with tqdm(total=TARGET_EACH_TYPE * 6, desc="Processing files", unit="file") as pbar:
+        for q in qs["qs"][start_idx:]:
+            last_idx += 1
+            if question_counts[q['qtype']] >= TARGET_EACH_TYPE:
+                continue
 
-    for q in qs["qs"][start_idx:]:
-        last_idx += 1
-        if question_counts[q['qtype']] >= TARGET_EACH_TYPE:
-            continue
+            for idx, img_path in enumerate(q['img_paths']):
+                path = "images/" + "/".join(img_path.split("/")[5:])
+                q['img_paths'][idx] = download_blob_as_base64(path)
+            
+            curr_shard_qs.append(q)
 
-        for idx, img_path in enumerate(q['img_paths']):
-            q['img_paths'][idx] = download_blob_as_base64(img_path)
+            question_counts[q['qtype']] += 1
+            total_qs += 1
+            pbar.update(1)
+            sys.stdout.flush() 
+
+            if total_qs % SHARD_SIZE == 0 and total_qs != 0:
+                dictionaries_to_tar_in_gcp(curr_shard_qs, folder_name, num_shards)
+                curr_shard_qs = []
+                num_shards += 1
+
+
+            if all(ct == TARGET_EACH_TYPE for ct in question_counts.values()):
+                break
         
-        curr_shard_qs.append(q)
-
-        question_counts[q['qtype']] += 1
-        total_qs += 1
-
-        if total_qs % SHARD_SIZE == 0 and total_qs != 0:
-            dictionaries_to_tar_in_gcp(curr_shard_qs, folder_name, num_shards)
-            curr_shard_qs = []
-            num_shards += 1
-
-
-        if all(ct == TARGET_EACH_TYPE for ct in question_counts.values()):
-            break
-    
     if len(curr_shard_qs) > 0:
         dictionaries_to_tar_in_gcp(curr_shard_qs, folder_name, num_shards)
     
